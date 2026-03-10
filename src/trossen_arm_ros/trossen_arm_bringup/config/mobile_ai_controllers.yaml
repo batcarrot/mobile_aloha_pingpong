@@ -1,0 +1,84 @@
+# Controller config for mobile_ai: dual follower arms (follower_left, follower_right)
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    follower_left_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    follower_left_gripper_controller:
+      type: parallel_gripper_action_controller/GripperActionController
+    follower_right_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    follower_right_gripper_controller:
+      type: parallel_gripper_action_controller/GripperActionController
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+follower_left_arm_controller:
+  ros__parameters:
+    joints:
+      - follower_left/joint_0
+      - follower_left/joint_1
+      - follower_left/joint_2
+      - follower_left/joint_3
+      - follower_left/joint_4
+      - follower_left/joint_5
+    command_joints:
+      - follower_left/joint_0
+      - follower_left/joint_1
+      - follower_left/joint_2
+      - follower_left/joint_3
+      - follower_left/joint_4
+      - follower_left/joint_5
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    allow_nonzero_velocity_at_trajectory_end: false
+    constraints:
+      stopped_velocity_tolerance: 0.02
+      goal_time: 2.0
+
+follower_left_gripper_controller:
+  ros__parameters:
+    joint: follower_left/left_carriage_joint
+
+follower_right_arm_controller:
+  ros__parameters:
+    joints:
+      - follower_right/joint_0
+      - follower_right/joint_1
+      - follower_right/joint_2
+      - follower_right/joint_3
+      - follower_right/joint_4
+      - follower_right/joint_5
+    command_joints:
+      - follower_right/joint_0
+      - follower_right/joint_1
+      - follower_right/joint_2
+      - follower_right/joint_3
+      - follower_right/joint_4
+      - follower_right/joint_5
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+    allow_partial_joints_goal: false
+    allow_nonzero_velocity_at_trajectory_end: false
+    constraints:
+      stopped_velocity_tolerance: 0.02
+      goal_time: 2.0
+
+follower_right_gripper_controller:
+  ros__parameters:
+    joint: follower_right/left_carriage_joint
+
+joint_state_broadcaster:
+  ros__parameters: {}

@@ -1,0 +1,12 @@
+breathe
+docutils
+exhale
+pip
+sphinx
+sphinx-copybutton
+sphinx-multiversion
+sphinx-rtd-theme
+sphinx-tabs
+sphinxcontrib-mermaid
+sphinxcontrib-video
+sphinxcontrib-youtube

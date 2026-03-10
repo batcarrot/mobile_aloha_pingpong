@@ -1,0 +1,32 @@
+# Dual FLIR Blackfly S config for robotpingpong (cam0 + cam1).
+# Resolution 720×540 matches calibration; 200 Hz requires manual exposure and short exposure_time.
+
+/**:
+  ros__parameters:
+    debug: false
+    compute_brightness: false
+    adjust_timestamp: true
+    dump_node_map: false
+    gain_auto: 'Continuous'
+    exposure_auto: 'Off'
+    exposure_time: 2000.0
+    frame_rate_auto: 'Off'
+    frame_rate: 200.0
+    frame_rate_enable: true
+    buffer_queue_size: 10
+    trigger_mode: 'Off'
+    device_link_throughput_limit: 380000000
+    image_width: 720
+    image_height: 540
+    chunk_mode_active: true
+    chunk_selector_frame_id: 'FrameID'
+    chunk_enable_frame_id: true
+    chunk_selector_exposure_time: 'ExposureTime'
+    chunk_enable_exposure_time: true
+    chunk_selector_gain: 'Gain'
+    chunk_enable_gain: true
+    chunk_selector_timestamp: 'Timestamp'
+    chunk_enable_timestamp: true
+    diagnostic_period: 1.0
+    diagnostic_min_freq: 198.0
+    diagnostic_max_freq: 202.0
