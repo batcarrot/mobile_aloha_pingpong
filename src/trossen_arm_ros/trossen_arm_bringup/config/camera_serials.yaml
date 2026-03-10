@@ -1,6 +1,0 @@
-# Camera serial numbers (matched by GetDeviceSerialNumber / device serial).
-# Used by robotpingpong/camera/calibration.py (cam0_id, cam1_id) and camera_setup.py.
-# Reference for launch args: camera_serial:="'<serial>'"
-cameras:
-  cam0_id: "25505853"
-  cam1_id: "25505854"

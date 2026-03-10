@@ -1,6 +1,3 @@
-# Dual FLIR Blackfly S config for robotpingpong (cam0 + cam1).
-# Resolution 720×540 matches calibration; 200 Hz requires manual exposure and short exposure_time.
-
 /**:
   ros__parameters:
     debug: false

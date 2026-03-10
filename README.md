@@ -1,6 +1,16 @@
 # mobile_aloha_pingpong
 
-ROS 2 (Jazzy) workspace for the mobile ALOHA ping-pong setup: Trossen arms and dual FLIR Blackfly S cameras (720×540 @ 200 Hz) for robotpingpong calibration and ball detection.
+ROS 2 (Jazzy) workspace for the mobile ALOHA ping-pong setup: Trossen arms, dual FLIR Blackfly S cameras (720×540 @ 200 Hz), and ball position from stereo detection.
+
+## Repository layout
+
+| Package | Role |
+|---------|------|
+| **trossen_arm_bringup** | Arm bringup only: controllers, mobile_ai launch, RViz, demos. Optional single FLIR in URDF via `use_flir_camera`. |
+| **mobile_aloha_camera** | Dual FLIR camera launch and config (720×540 @ 200 Hz), run script. |
+| **ball_detection_ros** | Ball position node (subscribes to cam images, publishes 3D position). Uses logic from robotpingpong/camera. |
+
+Plus the rest of `trossen_arm_ros` (description, hardware, moveit, controllers) and `trossen_arm_description`, `trossen_arm`.
 
 ## Prerequisites
 
@@ -14,59 +24,54 @@ From the workspace root:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select trossen_arm_bringup
+colcon build --packages-up-to mobile_aloha_camera ball_detection_ros
 source install/setup.bash
 ```
 
-## Dual FLIR cameras
+## Dual FLIR cameras (mobile_aloha_camera)
 
-Launch both Blackfly S cameras (cam0, cam1) with the project config (720×540, 200 Hz):
-
-```bash
-source install/setup.bash
-ros2 launch trossen_arm_bringup flir_dual_camera.launch.py
-```
-
-Or use the helper script (sets `SPINNAKER_GENTL64_CTI` then launches):
+Launch both Blackfly S cameras (cam0, cam1) with 720×540 @ 200 Hz:
 
 ```bash
-ros2 run trossen_arm_bringup run_flir_dual.sh
+ros2 launch mobile_aloha_camera flir_dual_camera.launch.py
 ```
 
-**Launch arguments**
-
-| Argument       | Default     | Description              |
-|----------------|-------------|--------------------------|
-| `use_cam0`     | `true`      | Launch cam0              |
-| `use_cam1`     | `true`      | Launch cam1              |
-| `cam0_serial`  | `'25505853'`| Serial for cam0 (string) |
-| `cam1_serial`  | `'25505854'`| Serial for cam1 (string) |
-
-Example: run only cam0 for testing:
+Or use the helper script (sets GenTL env then launches):
 
 ```bash
-ros2 launch trossen_arm_bringup flir_dual_camera.launch.py use_cam1:=false
+ros2 run mobile_aloha_camera run_flir_dual.sh
 ```
 
-**Topics**
+**Launch arguments:** `use_cam0`, `use_cam1`, `cam0_serial` (default `'25505853'`), `cam1_serial` (default `'25505854'`).
 
-- `/cam0/image_raw` — `sensor_msgs/msg/Image`
-- `/cam0/camera_info` — `sensor_msgs/msg/CameraInfo`
-- `/cam1/image_raw` — `sensor_msgs/msg/Image`
-- `/cam1/camera_info` — `sensor_msgs/msg/CameraInfo`
+**Topics:** `/cam0/image_raw`, `/cam0/camera_info`, `/cam1/image_raw`, `/cam1/camera_info`.
 
-**View images**
+**Config:** `mobile_aloha_camera/config/flir_dual_camera.yaml`, `camera_serials.yaml`.
+
+## Ball position (ball_detection_ros)
+
+Subscribes to `/cam0/image_raw` and `/cam1/image_raw`, runs robotpingpong-style detection (background subtract, epipolar intersection, optional Kalman), publishes 3D position. Calibration: use a `calibration.npz` from robotpingpong/camera (e.g. from `cam_localization.py`).
+
+**Run with cameras already running:**
 
 ```bash
-ros2 run rqt_image_view rqt_image_view
+ros2 run ball_detection_ros ball_position_node.py --ros-args -p calibration_file:=/path/to/calibration.npz
 ```
 
-Select `/cam0/image_raw` or `/cam1/image_raw` from the dropdown.
+**Launch cameras + ball node together:**
 
-**Config**
+```bash
+ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/path/to/calibration.npz
+```
 
-- `trossen_arm_bringup/config/flir_dual_camera.yaml` — frame rate, resolution, exposure, throughput limit.
-- `trossen_arm_bringup/config/camera_serials.yaml` — reference for cam0/cam1 serials (robotpingpong calibration).
+**Output topics:** `ball_position_node/ball_position` (`geometry_msgs/PointStamped`), `ball_position_node/ball_velocity` (`geometry_msgs/Vector3`). Parameters: `median_frames`, `no_ball_reset_frames`, `max_intersect_error`, `use_kalman`; optional `cam0_topic`, `cam1_topic`.
 
-If cameras are not found, ensure `SPINNAKER_GENTL64_CTI` points to the Spinnaker GenTL `.cti` file (the launch file sets it automatically; the script does too).
+## Arms (trossen_arm_bringup)
 
+Bring up mobile_ai (dual arms, optional single camera in URDF, RViz):
+
+```bash
+ros2 launch trossen_arm_bringup mobile_ai.launch.py
+```
+
+See package launch and config for controller and hardware options.

@@ -16,7 +16,6 @@ install(
   PROGRAMS
     demos/controllers.py
     demos/single_arm_demo.py
-    scripts/run_flir_dual.sh
   DESTINATION
     lib/${PROJECT_NAME}
 )
