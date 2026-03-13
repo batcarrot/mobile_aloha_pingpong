@@ -78,3 +78,47 @@ ros2 launch trossen_arm_bringup mobile_ai.launch.py
 ```
 
 See package launch and config for controller and hardware options.
+
+first terminal
+```
+
+ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/home/trossen-ai/Downloads/calibration.npz
+
+```
+second term
+```
+ros2 launch trossen_arm_bringup trossen_arm.launch.py ip_address:=192.168.1.5
+```
+if you want sim:
+```
+ros2 launch trossen_arm_bringup trossen_arm.launch.py ros2_control_hardware_type:=mock_components
+```
+third term
+```
+ros2 run mpc_ros mpc_node.py
+```
+if you only want prediction
+```
+ros2 run mpc_ros ball_prediction_node.py
+```
+rviz:
+```
+ros2 run rviz2 rviz2
+```
+incase calibration 
+
+install sdk full and python sdk from: https://www.teledynevisionsolutions.com/products/spinnaker-sdk/?model=Spinnaker%20SDK&vertical=machine%20vision&segment=iis
+
+python=3.10
+
+install my repo with `pip install -e .`
+
+
+python -m robotpingpong.camera.calibration_web.py
+
+anytime you change something
+in all the terminal
+```
+colcon build
+source install/setup.bash
+```

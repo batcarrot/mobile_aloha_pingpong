@@ -159,6 +159,37 @@ class ArmNode(Node):
         future.add_done_callback(self._goal_response_callback)
 
         return future
+    
+    def send_trajectory(self, positions: np.ndarray, velocities: np.ndarray=None, accelerations: np.ndarray=None, duration_s: float = 0.05):
+        goal_msg = FollowJointTrajectory.Goal()
+        goal_msg.trajectory.joint_names = self.joint_names
+
+        traj_len = len(positions)
+        for k in range(traj_len):
+            traj_pt = JointTrajectoryPoint()
+            traj_pt.positions = positions[k].tolist()
+            if velocities is not None:
+                traj_pt.velocities = velocities[k].tolist()
+            if accelerations is not None:
+                traj_pt.accelerations = accelerations[k].tolist()
+            
+            t_from_start = (k + 1) * duration_s
+            sec = int(t_from_start)
+            nsec = int((t_from_start - sec) * S_TO_NS)
+            traj_pt.time_from_start.sec = sec
+            traj_pt.time_from_start.nanosec = nsec
+
+            goal_msg.trajectory.points.append(traj_pt)
+        future = self._action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=self._feedback_callback
+        )
+        self._is_running = True
+        future.add_done_callback(self._goal_response_callback)
+
+        return future
+
+
 
 def main():
     rclpy.init()
@@ -173,6 +204,20 @@ def main():
                                     qd.tolist() if qd is not None else None,
                                     qdd.tolist() if qdd is not None else None,
                                     duration_s=dt)
+        try:
+            rclpy.spin_until_future_complete(arm_node, future)
+        except:
+            return False
+        return False
+    
+    def send_trajectory(q: np.ndarray, qd: np.ndarray=None, qdd: np.ndarray=None, dt=0.05):
+        print('sending traj')
+        print('traj q', q.min(), q.max())
+        if qd is not None:
+            print('traj qd', qd.min(), qd.max())
+        if qdd is not None:
+            print('traj qdd', qdd.min(), qd.max())
+        future = arm_node.send_trajectory(q, qd, qdd, duration_s=dt)
         try:
             rclpy.spin_until_future_complete(arm_node, future)
         except:
@@ -209,77 +254,64 @@ def main():
             continue
         
         if abs(ball_prediction_node.p_des[0] - hit_plane) > 1e-2:
-            print('no reach', abs(ball_prediction_node.p_des[0] - hit_plane))
+            # print('no reach', abs(ball_prediction_node.p_des[0] - hit_plane))
             continue
 
         rclpy.spin_once(arm_state_node, timeout_sec=0.01)
         if arm_state_node.q is None or arm_state_node.qd is None:
             continue
 
-        print('state', arm_state_node.q, arm_state_node)
+        # print('state', arm_state_node.q, arm_state_node)
 
         if ball_prediction_node.t_strike <= t:
             continue
         
-
-        t = time.time()
-        if ball_prediction_node.has_ball and t - last_mpc_time >= 0.05:
-            print(ball_prediction_node.p_des, ball_prediction_node.t_strike - t)
-            q_sol, qd_sol, qdd_sol, _, success, idx = arm_model.solve_ocp(
-                p_des=ball_prediction_node.p_des,
-                v_des=v_des,
-                o_des=n_des,
-                q0=arm_state_node.q,
-                qd0=arm_state_node.qd,
-                t=t,
-                t_f=ball_prediction_node.t_strike,
-            )
-            last_mpc_time = t
-
-            if not success:
-                print('mpc fail')
-                continue
-            else:
-                print('mpc success')
-        else:
-            print('no ball')
+        if not ball_prediction_node.has_ball:
             arm_model.reset_solver()
+            continue
 
+        if last_sent is not None and np.linalg.norm(last_sent - ball_prediction_node.p_des) <= 0.03:
+            continue
+
+        if ball_prediction_node.t_strike <= 0.05:
+            continue
+
+        q_sol, qd_sol, qdd_sol, _, success, idx = arm_model.solve_ocp(
+            p_des=ball_prediction_node.p_des,
+            v_des=v_des,
+            o_des=n_des,
+            q0=arm_state_node.q,
+            qd0=arm_state_node.qd,
+            t=t,
+            t_f=ball_prediction_node.t_strike,
+        )
+        qdd_sol = np.concatenate([qdd_sol, np.zeros_like(qdd_sol[-1:])], axis=0)
+
+        if not success:
+            print('mpc fail')
+            continue
+        else:
+            print('mpc success')
+
+        idx += 1
+        q_sol, qd_sol, qdd_sol = q_sol[idx:], qd_sol[idx:], qdd_sol[idx:]
         
         if q_sol is None:
             continue
-
-        jump_idx = 5
-
-        t0 = ball_prediction_node.t_strike - 30 * 0.05
-        idx = int(np.clip((t - t0) / 0.05, 0, 30))
-        if idx >= len(q_sol) - jump_idx:
-            continue
-        next_idx = min(idx + jump_idx, len(qdd_sol) - 1)
-
-        # np.savez('traj.npz', q=q_sol, qd=qd_sol, qdd=qdd_sol, idx=idx)
-
-        print('time till hit', ball_prediction_node.t_strike - t)
-        q_next = q_sol[idx]
-        qd_next = qd_sol[idx]
-        qdd_next = qdd_sol[idx]
-
-        print('idx', idx)
-
-        q_next = q_sol[-1]
-        fk = arm_model.fk_numeric(q_next)
+        
+        fk = arm_model.fk_numeric(q_sol[-1])
         error = ball_prediction_node.p_des - fk
         error_norm = np.linalg.norm(ball_prediction_node.p_des - fk)
 
-        if error_norm > 0.1:
+        if error_norm > 0.06:
             continue
+
         print('error', error, error_norm)
 
-        if last_sent is not None and np.linalg.norm(q_next - last_sent) < 1e-3:
-            continue
+        send_trajectory(q_sol, qd_sol, qdd_sol)
+        print('last joint', q_sol[-1][-1], arm_state_node.q[-1])
+        last_sent = ball_prediction_node.p_des
 
-        last_sent = q_next
-        send_cmd(q_next, None, None, dt=(ball_prediction_node.t_strike - t) * 0.9)
 
 
 

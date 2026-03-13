@@ -210,6 +210,7 @@ class BallPositionNode(Node):
         
         self.z_list.append(z[2])
         
+        # finding bounces
         if len(self.z_list) > 15:
             min_z_idx = np.argmin(self.z_list)
             if min_z_idx > 3 and min_z_idx < len(self.z_list) - 4:

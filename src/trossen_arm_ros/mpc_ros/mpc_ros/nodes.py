@@ -84,7 +84,7 @@ class BallPredictionNode(Node):
         out.point.z = float(self.filtered_p_des[2])
         self._pub_pos.publish(out)
 
-        self.t_strike += time.time()
+        self.t_strike += time.time() - 0.01
 
 
 def main():

@@ -587,7 +587,8 @@ class AlohaArmCasadi:
 
         ocp.add_leq_constraint(cs.sumsqr(ee - p_des), eps_p)
         ocp.add_leq_constraint(cs.sumsqr(Jpos @ qd[:, H] - v_des), eps_v)
-        ocp.add_leq_constraint(cs.sumsqr(cs.cross(n_des, ee_ori - ee)), eps_n)
+        # ocp.add_leq_constraint(cs.sumsqr(cs.cross(n_des, ee_ori - ee)), eps_n)
+        ocp.add_leq_constraint(cs.sumsqr(ee_ori - ee - n_des), eps_n)
         
 
         # anchor "now" at knot selected by alpha (one-hot)
