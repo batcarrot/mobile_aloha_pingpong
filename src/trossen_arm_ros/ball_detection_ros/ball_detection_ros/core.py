@@ -11,6 +11,8 @@ try:
 except ImportError:
     HAS_KALMAN = False
 
+table_x = 1.37 + 0.9
+table_surface_z = 0.76
 
 def get_kalman_filter():
     if not HAS_KALMAN:
@@ -102,6 +104,19 @@ def bounding_box(frame):
         frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
     if contours:
+        rects = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+
+            valid = True
+            valid &= area > 5
+            valid &= perimeter > 0
+            valid &= (perimeter ** 2 / area) < 20
+
+            if valid:
+                rects.append(cv2.boundingRect(contour))
+
         return [cv2.boundingRect(c) for c in contours]
     return None
 
@@ -126,7 +141,7 @@ def detect_3d(
     K, R0, t0, R1, t1,
     reference_pos=None,
     max_intersect_error=0.1,
-    temporal_weight=0.1,
+    temporal_weight=1.0,
 ):
     epi0 = pipeline(frame0, K, R0, t0, median0)
     epi1 = pipeline(frame1, K, R1, t1, median1)

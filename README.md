@@ -62,6 +62,9 @@ ros2 run ball_detection_ros ball_position_node.py --ros-args -p calibration_file
 
 ```bash
 ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/path/to/calibration.npz
+
+this vvvvv
+ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/home/trossen-ai/Downloads/calibration.npz
 ```
 
 **Output topics:** `ball_position_node/ball_position` (`geometry_msgs/PointStamped`), `ball_position_node/ball_velocity` (`geometry_msgs/Vector3`). Parameters: `median_frames`, `no_ball_reset_frames`, `max_intersect_error`, `use_kalman`; optional `cam0_topic`, `cam1_topic`.
