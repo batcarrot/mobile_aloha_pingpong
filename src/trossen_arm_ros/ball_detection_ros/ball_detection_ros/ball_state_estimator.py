@@ -80,6 +80,7 @@ class BallStateEstimatorNoSpin:
             if self.bounce_t is None:
                 self.bounce_t = float(t_new)
                 self.bounce_state = self.state
+                return None
         
             self.pos_list = np.zeros((0, 3))
             self.t_list = np.zeros((0, 1))
@@ -111,9 +112,8 @@ class BallStateEstimatorNoSpin:
         if not self.init:
             self.coeffs = self._fit_no_drag()
             self.init = True
-        
-        # Warm-start IRLS from previous solution — converges in 2-3 iters
-        self.coeffs = self._irls(self.coeffs)
+        else: 
+            self.coeffs = self._irls(self.coeffs)
         self.update_state()
         
         
