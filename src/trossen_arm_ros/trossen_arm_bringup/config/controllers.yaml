@@ -32,8 +32,8 @@ arm_controller:
       - position
       - velocity
 
-    state_publish_rate: 50.0 # Hz
-    action_monitor_rate: 50.0 # Hz
+    state_publish_rate: 100.0 # Hz
+    action_monitor_rate: 100.0 # Hz
     allow_partial_joints_goal: false
     allow_nonzero_velocity_at_trajectory_end: true
     constraints:

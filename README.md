@@ -97,6 +97,23 @@ third term
 ```
 ros2 run mpc_ros mpc_node.py
 ```
+
+### MPC bag recording and MCAP conversion
+
+Record `/mpc_step` to a timestamped folder under `~/bags` (each run gets its own `mpc_run_YYYYMMDD_HHMMSS` directory):
+
+```bash
+ros2 bag record -o ~/bags/mpc_run_$(date +%Y%m%d_%H%M%S) /mpc_step
+```
+
+Convert that recording to the `mpc_data.pkl`-style pickle. From the workspace root, set `--dir` to the **folder that contains the `.mcap` you want**—usually the run directory for the latest (or chosen) bag, e.g. replace the path with your own `mpc_run_*` folder name:
+
+```bash
+.venv/bin/python conversion.py --dir /home/trossen-ai/bags/mpc_run_20260325_205317
+```
+
+The script picks the newest `.mcap` in that directory (by the `YYYYMMDD_HHMMSS` in the filename) and writes `pkl/mpc_data_<timestamp>.pkl` next to it. Requires `mcap` and `mcap-ros2-support` in the project venv (`python3 -m venv .venv && .venv/bin/pip install mcap mcap-ros2-support numpy`).
+
 if you only want prediction
 ```
 ros2 run mpc_ros ball_prediction_node.py

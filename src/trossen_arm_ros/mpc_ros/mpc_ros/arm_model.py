@@ -9,8 +9,8 @@ import casadi as cs
 import re
 import math
 
-from mpc_ros.common import *
-from mpc_ros.ocp import OCPSolver
+from physics_utils.common import *
+from physics_utils import OCPSolver
 
 
 asset_path = Path(__file__).parent / 'aloha_paddle.usd'

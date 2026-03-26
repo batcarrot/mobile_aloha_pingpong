@@ -28,7 +28,7 @@ from ball_detection_ros.core import (
     table_x, table_surface_z
 )
 
-from ball_detection_ros.ball_model import BallStateEstimatorNoSpin
+from ball_detection_ros.ball_state_estimator import BallStateEstimatorNoSpin
 from ball_state_msgs.msg import BallState
 
 
@@ -99,7 +99,7 @@ class BallPositionNode(Node):
 
         self.k_D = 0.1487858280740126
         self.k_M = 0.01013947865393271
-        self._state_estimator = None
+        self._state_estimator = BallStateEstimatorNoSpin()
         self._current_trajectory = []
         self._current_trajectory_times = []
 
@@ -107,6 +107,8 @@ class BallPositionNode(Node):
 
         self.data = []
         self.last_save = 0
+
+        self._needs_reset = False
 
 
     def _to_grayscale(self, msg):
@@ -179,7 +181,7 @@ class BallPositionNode(Node):
 
                 self._current_trajectory = []
                 self._current_trajectory_times = []
-                self._state_estimator = None
+                self._state_estimator.reset()
                 self.z_list = []
 
                 msg = BallState()
@@ -205,33 +207,27 @@ class BallPositionNode(Node):
         #     pos_out = z
         #     vel_out = np.zeros(3)
 
-        self._current_trajectory.append(z)
-        self._current_trajectory_times.append(new_t)
+        # self._current_trajectory.append(z)
+        # self._current_trajectory_times.append(new_t)
         
-        self.z_list.append(z[2])
+        # self.z_list.append(z[2])
         
-        # finding bounces
-        if len(self.z_list) > 15:
-            min_z_idx = np.argmin(self.z_list)
-            if min_z_idx > 3 and min_z_idx < len(self.z_list) - 4:
-                self._current_trajectory = []
-                self._current_trajectory_times = []
-                self._state_estimator = None
-                self.z_list = []
+        # # finding bounces
+        # if len(self.z_list) > 15:
+        #     min_z_idx = np.argmin(self.z_list)
+        #     if min_z_idx > 3 and min_z_idx < len(self.z_list) - 4:
+        #         self._current_trajectory = []
+        #         self._current_trajectory_times = []
+        #         self._state_estimator = None
+        #         self.z_list = []
 
-        if len(self._current_trajectory) < 5:
+        state = self._state_estimator.add_point(new_t, z)
+        if state is None:
             return
-        if self._state_estimator is None:
-            self._state_estimator = BallStateEstimatorNoSpin(
-                np.stack(self._current_trajectory, axis=0),
-                np.array(self._current_trajectory_times),
-            )
-        else:
-            self._state_estimator.add_point(new_t, z)
         
-        estimated_pos, estimated_vel, estimated_ang_vel = self._state_estimator.predict(new_t)
-        pos_out = z
-        vel_out = estimated_vel[0]
+        # estimated_pos, estimated_vel, estimated_ang_vel = self._state_estimator.predict(new_t)
+        pos_out = state[0]
+        vel_out = state[1]
 
         self._reference_pos = pos_out.copy()
 

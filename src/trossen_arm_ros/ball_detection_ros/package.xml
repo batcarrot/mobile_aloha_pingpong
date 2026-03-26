@@ -15,6 +15,7 @@
   <depend>launch_ros</depend>
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
+  <depend>physics_utils</depend>
   <exec_depend>mobile_aloha_camera</exec_depend>
 
   <export>

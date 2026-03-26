@@ -9,7 +9,7 @@ from rclpy.node import Node
 
 from ball_state_msgs.msg import BallState
 from mpc_ros import BallModel
-from mpc_ros.common import *
+from physics_utils.common import *
 
 import pickle
 
@@ -25,7 +25,7 @@ class BallPredictionNode(Node):
         self.ball_model = BallModel(
             k_D=k_D, friction_coeff=0.08, restitution_coeff=0.9
         )
-        self.ema_strength = 0.9
+        self.ema_strength = 0.
         self.filtered_p_des = None
         self.data = []
         self.last_save = 0
@@ -34,15 +34,18 @@ class BallPredictionNode(Node):
             BallState,
             "ball_position_node/ball_state",
             self._cb_ball_pos,
-            10,
+            1,
         )
         self._pub_pos = self.create_publisher(
-            PointStamped, "~/pred_ball_pos", 10
+            PointStamped, "~/pred_ball_pos", 1
         )
+        self.pos, self.vel = None, None
+        self.ref_t = None
 
     def _cb_ball_pos(self, msg: BallState):
         self.has_ball = msg.has_ball
         if not self.has_ball:
+            self.pos, self.vel = None, None
             self.filtered_p_des = None
             return
         pos = np.array(
@@ -54,26 +57,30 @@ class BallPredictionNode(Node):
             [msg.velocity.x, msg.velocity.y, msg.velocity.z],
             dtype=float,
         )
-        self.p_des, self.t_strike = self.ball_model.predict(
+        self.pos, self.vel = pos, vel
+        self.ref_t = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
+        self.p_des, self.v_des, self.t_strike = self.ball_model.predict(
             pos,
             vel,
             np.zeros(3, dtype=np.float32),
+            return_vel=True
         )
-        
         if self.filtered_p_des is None:
             self.filtered_p_des = self.p_des
         else:
             a = self.ema_strength
             self.filtered_p_des = a * self.filtered_p_des + (1 - a) * self.p_des
 
-        self.data.append((pos, vel, self.p_des, self.t_strike))
+            
+
+        t = time.time()
+
+        self.data.append((pos, vel, self.p_des, self.t_strike, t))
         if len(self.data) - self.last_save >= 50:
             self.last_save = len(self.data)
             with open('pred_data.pkl', 'wb') as f:
                 pickle.dump(self.data, f)
-            
 
-        t = time.time()
         sec = int(t)
         out = PointStamped()
         out.header.stamp.sec = sec
@@ -84,8 +91,15 @@ class BallPredictionNode(Node):
         out.point.z = float(self.filtered_p_des[2])
         self._pub_pos.publish(out)
 
-        self.t_strike += time.time() - 0.01
+        self.t_strike += self.ref_t - compute_time_adjust
 
+    def get_return_params(self):
+        return self.ball_model.solve_landing(
+            self.p_des,
+            np.array([table_x + table_length / 2, 0, table_surface_z]),
+            self.v_des,
+            np.zeros(3),
+        )
 
 def main():
     rclpy.init()

@@ -1,4 +1,4 @@
 from mpc_ros.arm_model import *
-from mpc_ros.ball_model import *
-from mpc_ros.common import *
-from mpc_ros.ocp import *
+from physics_utils.common import *
+from physics_utils import OCPSolver
+from physics_utils import BallModel
