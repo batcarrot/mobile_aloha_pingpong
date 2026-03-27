@@ -21,9 +21,9 @@ class BallPredictionNode(Node):
         self.t_strike: Optional[float] = None
         self.has_ball: bool = False
 
-        k_D = 0.1487858280740126
+        k_D = 0.16
         self.ball_model = BallModel(
-            k_D=k_D, friction_coeff=0.08, restitution_coeff=0.9
+            k_D=k_D, friction_coeff=0.01, restitution_coeff=0.93
         )
         self.ema_strength = 0.
         self.filtered_p_des = None
@@ -59,12 +59,15 @@ class BallPredictionNode(Node):
         )
         self.pos, self.vel = pos, vel
         self.ref_t = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
-        self.p_des, self.v_des, self.t_strike = self.ball_model.predict(
+        p_des,v_des, self.t_strike = self.ball_model.predict(
             pos,
             vel,
             np.zeros(3, dtype=np.float32),
             return_vel=True
         )
+        # if p_des[2] < table_surface_z:
+        #     return
+        self.p_des, self.v_des = p_des, v_des
         if self.filtered_p_des is None:
             self.filtered_p_des = self.p_des
         else:

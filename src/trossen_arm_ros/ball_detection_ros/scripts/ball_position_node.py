@@ -97,9 +97,9 @@ class BallPositionNode(Node):
             f"median_frames={self.median_frames}, use_kalman={self.use_kalman}"
         )
 
-        self.k_D = 0.1487858280740126
+        self.k_D = 0.16
         self.k_M = 0.01013947865393271
-        self._state_estimator = BallStateEstimatorNoSpin()
+        self._state_estimator = BallStateEstimatorNoSpin(k_D=self.k_D)
         self._current_trajectory = []
         self._current_trajectory_times = []
 
@@ -109,6 +109,9 @@ class BallPositionNode(Node):
         self.last_save = 0
 
         self._needs_reset = False
+
+        self._has_published = False
+        self._n_data = 0
 
 
     def _to_grayscale(self, msg):
@@ -164,12 +167,25 @@ class BallPositionNode(Node):
             reference_pos=self._reference_pos,
             max_intersect_error=self.max_intersect_error,
         )
+        if pos is not None:
+            pos_publish = np.asarray(pos, dtype=float) + np.array([0.9, 0., table_surface_z])
+            out = PointStamped()
+            sec = int(new_t)
+            nsec = int((new_t - sec) * 1e9)
+            out.header.stamp.sec = sec
+            out.header.stamp.nanosec = nsec
+            out.header.frame_id = "map"
+            out.point.x = float(pos_publish[0])
+            out.point.y = float(pos_publish[1])
+            out.point.z = float(pos_publish[2])
+            self._pub_pos.publish(out)
+            # return        
 
-        self.data.append((pos, new_t))
-        if len(self.data) - self.last_save >= 10:
-            self.last_save = len(self.data)
-            with open('det_data.pkl', 'wb') as f:
-                pickle.dump(self.data, f)
+        # self.data.append((pos, new_t))
+        # if len(self.data) - self.last_save >= 10:
+        #     self.last_save = len(self.data)
+        #     with open('det_data.pkl', 'wb') as f:
+        #         pickle.dump(self.data, f)
             
 
         if pos is None:
@@ -187,6 +203,9 @@ class BallPositionNode(Node):
                 msg = BallState()
                 msg.has_ball = False
                 self._pub_state.publish(msg)
+
+                self._has_published = False
+                self._n_data = 0
             return
 
         self._no_ball_count = 0
@@ -221,10 +240,19 @@ class BallPositionNode(Node):
         #         self._state_estimator = None
         #         self.z_list = []
 
+        self._n_data += 1
         state = self._state_estimator.add_point(new_t, z)
         if state is None:
             return
         
+        if self._has_published:
+            return
+        
+        if self._n_data < 50:
+            return
+
+        self._has_published = True
+
         # estimated_pos, estimated_vel, estimated_ang_vel = self._state_estimator.predict(new_t)
         pos_out = state[0]
         vel_out = state[1]
@@ -251,15 +279,6 @@ class BallPositionNode(Node):
 
         out.has_ball = True
         self._pub_state.publish(out)
-
-        out = PointStamped()
-        out.header.stamp.sec = sec
-        out.header.stamp.nanosec = nsec
-        out.header.frame_id = "map"
-        out.point.x = float(pos_out[0])
-        out.point.y = float(pos_out[1])
-        out.point.z = float(pos_out[2])
-        self._pub_pos.publish(out)
 
 
 def main(args=None):

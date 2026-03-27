@@ -3,14 +3,14 @@ from physics_utils import BallModel
 from physics_utils.common import *
 
 class BallStateEstimatorNoSpin:
-    def __init__(self, pos_list=[], t_list=[], g=-9.81, k_D=0.1487858280740126, phys_weight=0.05, irls_iters=3, init_points=40):
+    def __init__(self, pos_list=[], t_list=[], g=-9.81, k_D=0.1487858280740126, phys_weight=0.05, irls_iters=3, init_points=20):
         self.g = g
         self.k_D = k_D
         self.phys_weight = phys_weight
         self.irls_iters = irls_iters
         self.init_points = init_points
         
-        self.ball_model = BallModel(k_D=k_D, friction_coeff=0.05, restitution_coeff=0.93)
+        self.ball_model = BallModel(k_D=k_D, friction_coeff=0.01, restitution_coeff=0.93)
         self.reset()
 
     def _fit_no_drag(self):
@@ -69,22 +69,25 @@ class BallStateEstimatorNoSpin:
         self.t_list = np.zeros((0, 1))
         self.init = False
         self.state = None
+        self.has_bounced = False
         self.bounce_t = None
         
     def add_point(self, t_new, pos_new):
         if len(self.t_list) == 0:
             self.t0 = float(t_new)
+
         # BOUNCE
         if pos_new[2] <= table_surface_z + 0.05:
             print('BOUNCE')
+            self.has_bounced = True
             if self.bounce_t is None:
                 self.bounce_t = float(t_new)
                 self.bounce_state = self.state
-                return None
         
+        if self.has_bounced:
             self.pos_list = np.zeros((0, 3))
             self.t_list = np.zeros((0, 1))
-            self.init = False    
+            
         
         pos_new = np.asarray(pos_new, dtype=float).reshape(3)
         tau = float(t_new) - self.t0
@@ -99,21 +102,18 @@ class BallStateEstimatorNoSpin:
                     self.bounce_state[1], 
                     np.zeros(3), 
                     stop_t=t_new - self.bounce_t, 
-                    return_vel=True,
+                    return_vel=True, 
                 )
                 self.bounce_t = t_new
                 self.bounce_state = [p, v]
-                return p, v, np.zeros(3)
+                return p, v
             return None
-
-        self.bounce_t = None
-        self.bounce_state = None
-
         if not self.init:
             self.coeffs = self._fit_no_drag()
             self.init = True
-        else: 
-            self.coeffs = self._irls(self.coeffs)
+        
+        # Warm-start IRLS from previous solution — converges in 2-3 iters
+        self.coeffs = self._irls(self.coeffs)
         self.update_state()
         
         

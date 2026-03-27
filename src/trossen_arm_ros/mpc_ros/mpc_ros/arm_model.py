@@ -40,7 +40,7 @@ class AlohaArmCasadi:
         self.ee_frame_name = ee_frame_name
         self.ee_frame_id = self.model.getFrameId(self.ee_frame_name)
         
-        self.ee_local_offset = np.array([0.25, 0., 0.])
+        self.ee_local_offset = np.array([0.27, 0., 0.])
         self.normal_dir = cs.DM([[0.], [0.], [1.]])
         self.ee_local_offset_dm = cs.DM(self.ee_local_offset)
         

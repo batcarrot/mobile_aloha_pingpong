@@ -381,6 +381,7 @@ def main():
         
         start_time = time.time()
         v_des, n_des = ball_prediction_node.get_return_params()
+        # v_des = np.array([0., 0., 0.])
         if v_des is None or n_des is None:
             v_des = np.array([0., 0., 0.])
             n_des = np.array([1., 0., 0.])
@@ -388,6 +389,7 @@ def main():
         print('n_des', n_des)
         q_sol, qd_sol, qdd_sol, _, success, idx = arm_model.solve_ocp(
             p_des=ball_prediction_node.p_des,
+            # p_des=np.array([hit_plane, -0.08, 1.12]),
             v_des=v_des,
             o_des=n_des,
             q0=arm_state_node.q,
@@ -433,7 +435,7 @@ def main():
         elapsed_time = time.time() - ball_prediction_node.ref_t
         print('elapsed time', elapsed_time)
         if elapsed_time < compute_time_adjust:
-            time.sleep(max(compute_time_adjust - elapsed_time - 0.06, 0))
+            time.sleep(max(compute_time_adjust - elapsed_time, 0))
         last_traj_q = q_sol
         last_traj_qd = qd_sol
         last_traj_qdd = qdd_sol

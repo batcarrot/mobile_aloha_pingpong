@@ -204,6 +204,7 @@ class BallModel:
                 table_x - table_length / 2, table_x + table_length / 2,
                 -table_width / 2, table_width / 2,
             )
+            p += np.array([0., -0.04, 0.1])
             if return_vel:
                 return p, v, t
             else:

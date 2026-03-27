@@ -22,5 +22,5 @@ table_surface_z = table_height + table_thickness / 2
 hit_plane = table_x - table_length / 2  - 0.3
 landing_pos = np.array([table_x + table_length / 2, 0.0, table_surface_z])
 
-cam_z_error = 0.05
-compute_time_adjust = 0.08
+cam_z_error = -0.02
+compute_time_adjust = 0.03
