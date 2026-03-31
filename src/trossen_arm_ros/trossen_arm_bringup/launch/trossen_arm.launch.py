@@ -127,9 +127,16 @@ def generate_launch_description() -> LaunchDescription:
     declared_arguments = []
     declared_arguments.append(
         DeclareLaunchArgument(
+            'robot_name',
+            default_value='',
+            description='name for namespace'
+        )
+    )
+    declared_arguments.append(
+        DeclareLaunchArgument(
             'robot_model',
             default_value='wxai',
-            choices=('wxai'),
+            choices=('wxai',),
             description='model codename of the Trossen Arm such as `wxai`.'
         )
     )
@@ -198,7 +205,8 @@ def generate_launch_description() -> LaunchDescription:
                 'arm_side:=', LaunchConfiguration('arm_side'), ' ',
                 'ros2_control_hardware_type:=', LaunchConfiguration('ros2_control_hardware_type'),
                 ' ',
-                'ip_address:=', LaunchConfiguration('ip_address'),
+                'ip_address:=', LaunchConfiguration('ip_address'), ' ',
+                'robot_name:=', LaunchConfiguration('robot_name'), ' ',
             ])
         )
     )

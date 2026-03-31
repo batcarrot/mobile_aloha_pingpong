@@ -204,7 +204,7 @@ class BallModel:
                 table_x - table_length / 2, table_x + table_length / 2,
                 -table_width / 2, table_width / 2,
             )
-            p += np.array([0., -0.04, 0.1])
+            # p += np.array([0., -0.04, 0.05])
             if return_vel:
                 return p, v, t
             else:
@@ -268,7 +268,11 @@ class BallModel:
                   ang_vel_pre_impact,
                   v_paddle,
                   n_paddle,
+                  restitution_coeff=None,
                   k_p=1e-5):
+        restitution_coeff = self.restitution_coeff if restitution_coeff is None else restitution_coeff
+
+
         Kv = k_p / self.m
         Kw = k_p / self.I
         
@@ -282,7 +286,7 @@ class BallModel:
         Av = cs.DM([
             [1 - Kv, 0, 0],
             [0, 1 - Kv, 0],
-            [0, 0, -self.restitution_coeff]
+            [0, 0, -restitution_coeff]
         ])
         Bv = Kv * cs.DM([
             [0, self.ball_radius, 0],
@@ -338,7 +342,8 @@ class BallModel:
             ang_vel_pre_impact=cs.MX(ang_vel_pre_impact),
             v_paddle=v_des,
             n_paddle=n_des,
-            k_p=k_p
+            k_p=k_p,
+            restitution_coeff=0.5
         )
 
         # Closed-form position at time t_hit (continuous ballistic, no aero)

@@ -304,7 +304,7 @@ def main():
     v_des = np.array([0., 0., 0.])
     n_des = np.array([1., 0., 0.])
     q_sol, _, _, _, success, _ = arm_model.solve_ocp(
-        p_des = np.array([hit_plane, 0., table_surface_z + 0.18]),
+        p_des = np.array([hit_plane, 0., table_surface_z + 0.15]),
         v_des=v_des,
         o_des=n_des,
         q0=np.zeros(6, dtype=float),
