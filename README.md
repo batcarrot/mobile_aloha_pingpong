@@ -8,7 +8,7 @@ ROS 2 (Jazzy) workspace for the mobile ALOHA ping-pong setup: Trossen arms, dual
 |---------|------|
 | **trossen_arm_bringup** | Arm bringup only: controllers, mobile_ai launch, RViz, demos. Optional single FLIR in URDF via `use_flir_camera`. |
 | **mobile_aloha_camera** | Dual FLIR camera launch and config (720×540 @ 200 Hz), run script. |
-| **ball_detection_ros** | Ball position node (subscribes to cam images, publishes 3D position). Uses logic from robotpingpong/camera. |
+| **ball_detection_ros** | Ball position (FLIR stereo), optional D405 RGB ball filter, RGB debug capture (`d405_calibration_snapshot.py`). Uses logic from robotpingpong/camera. |
 
 Plus the rest of `trossen_arm_ros` (description, hardware, moveit, controllers) and `trossen_arm_description`, `trossen_arm`.
 
@@ -50,7 +50,7 @@ ros2 run mobile_aloha_camera run_flir_dual.sh
 
 ## Ball position (ball_detection_ros)
 
-Subscribes to `/cam0/image_raw` and `/cam1/image_raw`, runs robotpingpong-style detection (background subtract, epipolar intersection, optional Kalman), publishes 3D position. Calibration: use a `calibration.npz` from robotpingpong/camera (e.g. from `cam_localization.py`).
+Subscribes to `/cam0/image_raw` and `/cam1/image_raw`, runs robotpingpong-style detection (background subtract, epipolar intersection, optional Kalman), and publishes map-frame outputs. Supply a `calibration.npz` that includes **cam0**, **cam1**, and (for D405) **cam2** (see [Camera calibration](#camera-calibration) below).
 
 **Run with cameras already running:**
 
@@ -58,16 +58,48 @@ Subscribes to `/cam0/image_raw` and `/cam1/image_raw`, runs robotpingpong-style 
 ros2 run ball_detection_ros ball_position_node.py --ros-args -p calibration_file:=/path/to/calibration.npz
 ```
 
-**Launch cameras + ball node together:**
+**Launch FLIR cameras + ball node together:**
 
 ```bash
-ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/path/to/calibration.npz
-
-this vvvvv
-ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/home/trossen-ai/Downloads/calibration.npz
+ros2 launch ball_detection_ros ball_position.launch.py \
+  calibration_file:=/path/to/calibration.npz
 ```
 
-**Output topics:** `ball_position_node/ball_position` (`geometry_msgs/PointStamped`), `ball_position_node/ball_velocity` (`geometry_msgs/Vector3`). Parameters: `median_frames`, `no_ball_reset_frames`, `max_intersect_error`, `use_kalman`; optional `cam0_topic`, `cam1_topic`.
+**Same launch with optional D405 RGB ball filter** (requires **D405 running** with color topics, and **cam2** in the npz; gates `~/ball_pos`, `~/stereo_ball_hypothesis`, and state updates on HSV in the projected ROI):
+
+```bash
+ros2 launch ball_detection_ros ball_position.launch.py \
+  calibration_file:=/home/trossen-ai/robotpingpong/robotpingpong/data/calibration.npz \
+  use_rgb_ball_filter:=true
+```
+
+Filter-related parameters (all on `ball_position_node`): `rgb_topic` (default `/d405/d405/color/image_rect_raw`), `camera_info_topic`, `rgb_sync_max_dt`, `rgb_roi_radius`, `rgb_min_good_fraction`, `rgb_gate_allow_without_image`, and HSV knobs `rgb_h_orange_lo` / `rgb_h_orange_hi` / etc. Full RGB debug (FLIR + D405 + captures): `ros2 launch ball_detection_ros ball_rgb_debug.launch.py` (supports the same `use_rgb_ball_filter` launch arg).
+
+**Output topics:** `ball_position_node/ball_pos` (`geometry_msgs/PointStamped`, map frame), `ball_position_node/ball_state` (`ball_state_msgs/BallState`), and optionally `ball_position_node/stereo_ball_hypothesis` (`geometry_msgs/PointStamped`, `stereo_calib`). Other parameters: `median_frames`, `no_ball_reset_frames`, `max_intersect_error`, `use_kalman`, `cam0_topic`, `cam1_topic`.
+
+## Camera calibration
+
+**Goal:** The FLIR stereo model and D405 **cam2** intrinsics/extrinsics must match the **same pixel streams** you use in ROS (resolution, raw vs rectified).
+
+1. **FLIR (cam0 / cam1)**  
+   Keep using your robotpingpong flow (e.g. `python -m robotpingpong.camera.calibration_web` or equivalent) for the table quad and `obj_corners`. Per-camera `K` in the npz should match **720×540** (or whatever `flir_dual_camera` publishes).
+
+2. **D405 aligned with `realsense2_camera`**  
+   The driver often publishes **`/d405/d405/color/image_rect_raw`** and **`/d405/d405/color/camera_info`** (not `color/image_raw`). For intrinsics that match ROS **without** running calibration inside ROS every time, grab one snapshot after `d405_color.launch.py` is running:
+
+   ```bash
+   ros2 run ball_detection_ros d405_calibration_snapshot.py --ros-args -p output_dir:=/tmp/d405_cal_snap
+   ```
+
+   That writes **`d405_frame.png`** (same pixels as `image_rect_raw`) and **`d405_intrinsics.json`** (`K`, `dist`, width, height). Use that image for RealSense corner clicks and pass **`K` / `dist`** into your `calibrate()` / web tool as **`realsense_K`** / **`realsense_dist`** so **`cam2`** in `calibration.npz` matches the ROS rectified stream.
+
+3. **Profile parity**  
+   Match **`depth_module.color_profile`** in `mobile_aloha_camera/launch/d405_color.launch.py` (default **848x480x30**) to the resolution you used when saving **`d405_frame.png`** / building **cam2**.
+
+4. **Optional `T_cam2_from_stereo`**  
+   If FLIR and D405 quads use different object-frame definitions, store a **4×4** **`T_cam2_from_stereo`** in the npz; otherwise consumers assume identity between stereo and D405 PnP frames.
+
+**Spinnaker / GenTL** (FLIR): see [Prerequisites](#prerequisites) and Teledyne Spinnaker SDK install notes at the end of this file if cameras are not discovered.
 
 ## Arms (trossen_arm_bringup)
 
@@ -79,22 +111,30 @@ ros2 launch trossen_arm_bringup mobile_ai.launch.py
 
 See package launch and config for controller and hardware options.
 
-first terminal
+**Example multi-terminal workflow**
+
+First terminal (stereo + ball; set `calibration_file` to your npz; add `use_rgb_ball_filter:=true` if D405 is up and you want the RGB gate):
+
+```bash
+ros2 launch ball_detection_ros ball_position.launch.py \
+  calibration_file:=/home/trossen-ai/robotpingpong/robotpingpong/data/calibration.npz
 ```
 
-ros2 launch ball_detection_ros ball_position.launch.py calibration_file:=/home/trossen-ai/Downloads/calibration.npz
+Second terminal:
 
-```
-second term
-```
+```bash
 ros2 launch trossen_arm_bringup trossen_arm.launch.py ip_address:=192.168.1.5
 ```
-if you want sim:
-```
+
+If you want sim:
+
+```bash
 ros2 launch trossen_arm_bringup trossen_arm.launch.py ros2_control_hardware_type:=mock_components
 ```
-third term
-```
+
+Third terminal:
+
+```bash
 ros2 run mpc_ros mpc_node.py
 ```
 
@@ -122,16 +162,19 @@ rviz:
 ```
 ros2 run rviz2 rviz2
 ```
-incase calibration 
+### FLIR SDK / offline calibration web tool
 
-install sdk full and python sdk from: https://www.teledynevisionsolutions.com/products/spinnaker-sdk/?model=Spinnaker%20SDK&vertical=machine%20vision&segment=iis
+Install the Spinnaker SDK and Python bindings from [Teledyne Spinnaker](https://www.teledynevisionsolutions.com/products/spinnaker-sdk/?model=Spinnaker%20SDK&vertical=machine%20vision&segment=iis) (your environment may use Python 3.10 for that stack).
 
-python=3.10
+Install your robotpingpong repo (editable): `pip install -e .`
 
-install my repo with `pip install -e .`
+Run the browser calibration tool (FLIR + optional RealSense in that repo):
 
+```bash
+python -m robotpingpong.camera.calibration_web
+```
 
-python -m robotpingpong.camera.calibration_web.py
+For D405 intrinsics that match **`realsense2_camera`** in ROS, prefer capturing **`d405_frame.png` / `d405_intrinsics.json`** with `d405_calibration_snapshot.py` (see [Camera calibration](#camera-calibration)) and feeding those values into your npz pipeline.
 
 anytime you change something
 in all the terminal

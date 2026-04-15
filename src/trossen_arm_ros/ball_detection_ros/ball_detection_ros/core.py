@@ -142,9 +142,15 @@ def detect_3d(
     reference_pos=None,
     max_intersect_error=0.1,
     temporal_weight=1.0,
+    K0=None,
+    K1=None,
 ):
-    epi0 = pipeline(frame0, K, R0, t0, median0)
-    epi1 = pipeline(frame1, K, R1, t1, median1)
+    if K0 is None:
+        K0 = K
+    if K1 is None:
+        K1 = K
+    epi0 = pipeline(frame0, K0, R0, t0, median0)
+    epi1 = pipeline(frame1, K1, R1, t1, median1)
     if epi0 is None or epi1 is None:
         return None
 

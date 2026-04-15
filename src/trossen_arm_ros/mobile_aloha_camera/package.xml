@@ -12,6 +12,10 @@
   <depend>launch</depend>
   <depend>launch_ros</depend>
   <exec_depend>spinnaker_camera_driver</exec_depend>
+  <exec_depend>realsense2_camera</exec_depend>
+  <!-- realsense2_camera uses image_transport; raw_pub lives in plugins -->
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>image_transport_plugins</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

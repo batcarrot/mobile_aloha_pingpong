@@ -14,22 +14,37 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
-from geometry_msgs.msg import PointStamped, Vector3
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import CameraInfo, Image
+from geometry_msgs.msg import PointStamped
+from std_msgs.msg import Float64
 from cv_bridge import CvBridge
 import time
-import pickle
 
 from ball_detection_ros.core import (
     get_kalman_filter,
     detect_3d,
     median_frame,
     HAS_KALMAN,
-    table_x, table_surface_z
+    table_surface_z,
 )
-
+from ball_detection_ros.rgb_capture_core import (
+    project_object_point_to_uv,
+    rgb_ball_good_fraction,
+    stereo_point_to_cam2_object,
+    stamp_to_float,
+)
 from ball_detection_ros.ball_state_estimator import BallStateEstimatorNoSpin
 from ball_state_msgs.msg import BallState
+
+
+def _param_bool(node, name: str) -> bool:
+    v = node.get_parameter(name).value
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "on")
+    return bool(v)
 
 
 class BallPositionNode(Node):
@@ -42,6 +57,24 @@ class BallPositionNode(Node):
         self.declare_parameter("use_kalman", False)
         self.declare_parameter("cam0_topic", "/cam0/image_raw")
         self.declare_parameter("cam1_topic", "/cam1/image_raw")
+        self.declare_parameter("publish_stereo_stamp_diff", True)
+        self.declare_parameter("stereo_stamp_diff_rate_hz", 10.0)
+        self.declare_parameter("log_stereo_stamp_diff", False)
+        self.declare_parameter("publish_stereo_ball_hypothesis", True)
+        # When true, require D405 HSV ball patch around projected stereo point before
+        # publishing stereo_hypothesis, ball_pos, or feeding the state estimator.
+        self.declare_parameter("use_rgb_ball_filter", False)
+        self.declare_parameter("rgb_topic", "/d405/d405/color/image_rect_raw")
+        self.declare_parameter("camera_info_topic", "/d405/d405/color/camera_info")
+        self.declare_parameter("rgb_sync_max_dt", 0.08)
+        self.declare_parameter("rgb_gate_allow_without_image", True)
+        self.declare_parameter("rgb_roi_radius", 32)
+        self.declare_parameter("rgb_min_good_fraction", 0.12)
+        self.declare_parameter("rgb_h_orange_lo", 5)
+        self.declare_parameter("rgb_h_orange_hi", 28)
+        self.declare_parameter("rgb_s_orange_min", 50)
+        self.declare_parameter("rgb_white_s_max", 45)
+        self.declare_parameter("rgb_white_v_min", 180)
 
         cal_path = self.get_parameter("calibration_file").value
         if not cal_path or not os.path.isfile(cal_path):
@@ -52,13 +85,69 @@ class BallPositionNode(Node):
             raise SystemExit(1)
 
         data = np.load(cal_path, allow_pickle=True)
-        self.K = data["K"]
+        self.K = np.asarray(data["K"], dtype=float)
         cam0 = data["cam0"].item()
         cam1 = data["cam1"].item()
         self.R0 = cam0["R"]
         self.t0 = cam0["t"]
         self.R1 = cam1["R"]
         self.t1 = cam1["t"]
+        self.K0 = (
+            np.asarray(cam0["K"], dtype=float)
+            if isinstance(cam0.get("K"), np.ndarray)
+            else self.K
+        )
+        self.K1 = (
+            np.asarray(cam1["K"], dtype=float)
+            if isinstance(cam1.get("K"), np.ndarray)
+            else self.K
+        )
+
+        self._rgb_filter_enabled = _param_bool(self, "use_rgb_ball_filter")
+        self._cam2 = None
+        self._T_stereo_to_cam2 = np.eye(4, dtype=float)
+        self._ci_K = None
+        self._ci_dist = None
+        self._rgb_bgr = None
+        self._rgb_stamp = None
+        self._rgb_sync_max = float(self.get_parameter("rgb_sync_max_dt").value)
+        self._rgb_allow_without_image = _param_bool(
+            self, "rgb_gate_allow_without_image"
+        )
+        self._rgb_roi = int(self.get_parameter("rgb_roi_radius").value)
+        self._rgb_min_good = float(self.get_parameter("rgb_min_good_fraction").value)
+        self._rgb_h_lo = int(self.get_parameter("rgb_h_orange_lo").value)
+        self._rgb_h_hi = int(self.get_parameter("rgb_h_orange_hi").value)
+        self._rgb_s_min = int(self.get_parameter("rgb_s_orange_min").value)
+        self._rgb_ws = int(self.get_parameter("rgb_white_s_max").value)
+        self._rgb_wv = int(self.get_parameter("rgb_white_v_min").value)
+        self._rgb_reject_log_t = 0.0
+
+        if self._rgb_filter_enabled:
+            if "cam2" not in data.files:
+                self.get_logger().error(
+                    "use_rgb_ball_filter requires cam2 in calibration.npz (pose + intrinsics)."
+                )
+                raise SystemExit(1)
+            self._cam2 = data["cam2"].item()
+            if "T_cam2_from_stereo" in data.files:
+                self._T_stereo_to_cam2 = np.asarray(
+                    data["T_cam2_from_stereo"], dtype=float
+                ).reshape(4, 4)
+            ci_topic = (self.get_parameter("camera_info_topic").value or "").strip()
+            rgb_tp = self.get_parameter("rgb_topic").value
+            self.create_subscription(
+                Image, rgb_tp, self._cb_rgb_filter, qos_profile_sensor_data
+            )
+            if ci_topic:
+                self.create_subscription(
+                    CameraInfo, ci_topic, self._cb_ci_filter, qos_profile_sensor_data
+                )
+            self.get_logger().info(
+                f"RGB ball filter ON: rgb={rgb_tp!r}, camera_info={ci_topic or 'npz K only'}, "
+                f"roi_r={self._rgb_roi}, min_good={self._rgb_min_good}, "
+                f"allow_without_image={self._rgb_allow_without_image}"
+            )
 
         self.median_frames = self.get_parameter("median_frames").value
         self.no_ball_reset_frames = self.get_parameter("no_ball_reset_frames").value
@@ -92,13 +181,29 @@ class BallPositionNode(Node):
         self._pub_state = self.create_publisher(BallState, "~/ball_state", 10)
         self._pub_pos = self.create_publisher(PointStamped, "~/ball_pos", 10)
 
+        self._pub_stereo_hyp = None
+        if self.get_parameter("publish_stereo_ball_hypothesis").value:
+            self._pub_stereo_hyp = self.create_publisher(
+                PointStamped, "~/stereo_ball_hypothesis", 10
+            )
+
+        self._pub_stereo_stamp_diff = None
+        if self.get_parameter("publish_stereo_stamp_diff").value:
+            self._pub_stereo_stamp_diff = self.create_publisher(
+                Float64, "~/stereo_stamp_diff_sec", 10
+            )
+            hz = float(self.get_parameter("stereo_stamp_diff_rate_hz").value)
+            hz = max(0.5, min(hz, 200.0))
+            self.create_timer(1.0 / hz, self._timer_publish_stereo_stamp_diff)
+        if self.get_parameter("log_stereo_stamp_diff").value:
+            self.create_timer(1.0, self._timer_log_stereo_stamp_diff)
+
         self.get_logger().info(
             f"Ball position node: calibration={cal_path}, "
             f"median_frames={self.median_frames}, use_kalman={self.use_kalman}"
         )
 
         self.k_D = 0.16
-        self.k_M = 0.01013947865393271
         self._state_estimator = BallStateEstimatorNoSpin(k_D=self.k_D)
         self._current_trajectory = []
         self._current_trajectory_times = []
@@ -113,12 +218,96 @@ class BallPositionNode(Node):
         self._has_published = False
         self._n_data = 0
 
-
     def _to_grayscale(self, msg):
         cv = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         if cv.ndim == 3:
             return np.asarray(cv2.cvtColor(cv, cv2.COLOR_BGR2GRAY), dtype=np.uint8)
         return np.asarray(cv, dtype=np.uint8)
+
+    def _imgmsg_to_bgr(self, msg):
+        enc = (msg.encoding or "").lower()
+        cv = np.asarray(
+            self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough"),
+            dtype=np.uint8,
+        )
+        if enc in ("rgb8", "rgba8"):
+            code = (
+                cv2.COLOR_RGBA2BGR
+                if cv.ndim == 3 and cv.shape[2] == 4
+                else cv2.COLOR_RGB2BGR
+            )
+            cv = cv2.cvtColor(cv, code)
+        return cv
+
+    def _cb_rgb_filter(self, msg):
+        self._rgb_bgr = self._imgmsg_to_bgr(msg)
+        self._rgb_stamp = stamp_to_float(msg.header.stamp)
+
+    def _cb_ci_filter(self, msg: CameraInfo):
+        K = np.asarray(msg.k, dtype=float).reshape(3, 3)
+        if not np.any(K):
+            return
+        d = np.asarray(msg.d, dtype=float).reshape(-1) if msg.d else np.zeros(0)
+        if d.size < 5:
+            d = np.pad(d, (0, 5 - d.size))
+        self._ci_K = K
+        self._ci_dist = d[:5]
+
+    def _projection_K_dist_for_rgb(self):
+        if self._ci_K is not None:
+            return self._ci_K, np.asarray(self._ci_dist, dtype=float)
+        K2 = np.asarray(self._cam2["K"], dtype=float)
+        dist = np.asarray(self._cam2.get("dist", np.zeros(5)), dtype=float).reshape(-1)
+        if dist.size < 5:
+            dist = np.pad(dist, (0, 5 - dist.size))
+        return K2, dist[:5]
+
+    def _rgb_ball_gate_pass(self, pos, stereo_t: float) -> bool:
+        if pos is None or not self._rgb_filter_enabled:
+            return True
+        if self._rgb_bgr is None or self._rgb_stamp is None:
+            return self._rgb_allow_without_image
+        if abs(self._rgb_stamp - stereo_t) > self._rgb_sync_max:
+            return False
+        p_obj = stereo_point_to_cam2_object(
+            np.asarray(pos, dtype=float), self._T_stereo_to_cam2
+        )
+        K2, dist = self._projection_K_dist_for_rgb()
+        uv = project_object_point_to_uv(
+            p_obj, self._cam2["R"], self._cam2["t"], K2, dist
+        )
+        if uv is None:
+            return False
+        u, v = uv
+        gf = rgb_ball_good_fraction(
+            self._rgb_bgr,
+            u,
+            v,
+            self._rgb_roi,
+            self._rgb_h_lo,
+            self._rgb_h_hi,
+            self._rgb_s_min,
+            self._rgb_ws,
+            self._rgb_wv,
+        )
+        return gf >= self._rgb_min_good
+
+    def _timer_publish_stereo_stamp_diff(self):
+        if self._pub_stereo_stamp_diff is None:
+            return
+        if self._latest0_stamp is None or self._latest1_stamp is None:
+            return
+        msg = Float64()
+        msg.data = float(abs(self._latest0_stamp - self._latest1_stamp))
+        self._pub_stereo_stamp_diff.publish(msg)
+
+    def _timer_log_stereo_stamp_diff(self):
+        if self._latest0_stamp is None or self._latest1_stamp is None:
+            return
+        dt = float(abs(self._latest0_stamp - self._latest1_stamp))
+        self.get_logger().info(
+            f"stereo |cam0_stamp - cam1_stamp| = {dt:.6f} s ({dt * 1e3:.3f} ms)"
+        )
 
     def _cb_cam0(self, msg):
         stamp = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
@@ -140,7 +329,7 @@ class BallPositionNode(Node):
 
         if self._median_frame1 is None:
             self._median_frame_list1.append(gray)
-            if len(self._median_frame_list0) >= self.median_frames:
+            if len(self._median_frame_list1) >= self.median_frames:
                 self._median_frame1 = median_frame(self._median_frame_list1, k=self.median_frames)
         self._process_pair()
 
@@ -166,8 +355,36 @@ class BallPositionNode(Node):
             self.K, self.R0, self.t0, self.R1, self.t1,
             reference_pos=self._reference_pos,
             max_intersect_error=self.max_intersect_error,
+            K0=self.K0,
+            K1=self.K1,
         )
-        if pos is not None:
+        stereo_t = (self._latest0_stamp + self._latest1_stamp) * 0.5
+        rgb_pass = self._rgb_ball_gate_pass(pos, stereo_t)
+        if self._rgb_filter_enabled and pos is not None and not rgb_pass:
+            now = time.time()
+            if now - self._rgb_reject_log_t > 2.0:
+                self._rgb_reject_log_t = now
+                self.get_logger().info(
+                    "RGB ball filter rejected stereo hit (HSV/sync/projection)."
+                )
+
+        if pos is not None and rgb_pass and self._pub_stereo_hyp is not None:
+            s = int(np.floor(stereo_t))
+            ns = int(round((stereo_t - s) * 1e9))
+            if ns >= 1_000_000_000:
+                s += 1
+                ns -= 1_000_000_000
+            hyp = PointStamped()
+            hyp.header.frame_id = "stereo_calib"
+            hyp.header.stamp.sec = s
+            hyp.header.stamp.nanosec = ns
+            p = np.asarray(pos, dtype=float).reshape(3)
+            hyp.point.x = float(p[0])
+            hyp.point.y = float(p[1])
+            hyp.point.z = float(p[2])
+            self._pub_stereo_hyp.publish(hyp)
+
+        if pos is not None and rgb_pass:
             pos_publish = np.asarray(pos, dtype=float) + np.array([0.9, 0., table_surface_z])
             out = PointStamped()
             sec = int(new_t)
@@ -179,16 +396,8 @@ class BallPositionNode(Node):
             out.point.y = float(pos_publish[1])
             out.point.z = float(pos_publish[2])
             self._pub_pos.publish(out)
-            # return        
 
-        # self.data.append((pos, new_t))
-        # if len(self.data) - self.last_save >= 10:
-        #     self.last_save = len(self.data)
-        #     with open('det_data.pkl', 'wb') as f:
-        #         pickle.dump(self.data, f)
-            
-
-        if pos is None:
+        if pos is None or not rgb_pass:
             self._no_ball_count += 1
             if self._no_ball_count >= self.no_ball_reset_frames:
                 self._state_mean = None
@@ -211,49 +420,19 @@ class BallPositionNode(Node):
         self._no_ball_count = 0
         z = np.asarray(pos, dtype=float) + np.array([0.9, 0., table_surface_z])
 
-        # if self._kf is not None and self._state_mean is not None:
-        #     self._state_mean, self._state_cov = self._kf.filter_update(
-        #         self._state_mean, self._state_cov, observation=z
-        #     )
-        #     pos_out = self._state_mean[:3]
-        #     vel_out = self._state_mean[3:]
-        # else:
-        #     if self._kf is not None:
-        #         self._state_mean = np.array(
-        #             [z[0], z[1], z[2], 0.0, 0.0, 0.0], dtype=float
-        #         )
-        #         self._state_cov = np.eye(6) * 1e-2
-        #     pos_out = z
-        #     vel_out = np.zeros(3)
-
-        # self._current_trajectory.append(z)
-        # self._current_trajectory_times.append(new_t)
-        
-        # self.z_list.append(z[2])
-        
-        # # finding bounces
-        # if len(self.z_list) > 15:
-        #     min_z_idx = np.argmin(self.z_list)
-        #     if min_z_idx > 3 and min_z_idx < len(self.z_list) - 4:
-        #         self._current_trajectory = []
-        #         self._current_trajectory_times = []
-        #         self._state_estimator = None
-        #         self.z_list = []
-
         self._n_data += 1
         state = self._state_estimator.add_point(new_t, z)
         if state is None:
             return
-        
+
         if self._has_published:
             return
-        
+
         if self._n_data < 50:
             return
 
         self._has_published = True
 
-        # estimated_pos, estimated_vel, estimated_ang_vel = self._state_estimator.predict(new_t)
         pos_out = state[0]
         vel_out = state[1]
 
@@ -262,8 +441,6 @@ class BallPositionNode(Node):
         t = (self._latest0_stamp + self._latest1_stamp) / 2.0
         sec = int(t)
         nsec = int((t - sec) * 1e9)
-
-        
 
         out = BallState()
         out.header.stamp.sec = sec

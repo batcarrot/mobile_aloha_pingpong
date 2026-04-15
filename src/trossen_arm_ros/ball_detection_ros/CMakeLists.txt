@@ -5,6 +5,10 @@ find_package(ament_cmake REQUIRED)
 
 install(DIRECTORY ball_detection_ros DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
-install(PROGRAMS scripts/ball_position_node.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS
+  scripts/ball_position_node.py
+  scripts/ball_rgb_capture_node.py
+  scripts/d405_calibration_snapshot.py
+  DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
